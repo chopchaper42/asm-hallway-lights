@@ -22,15 +22,22 @@
 .set  LONG_PHASE_LENGTH, 0xE1398  @1C2730 @ 0,1 sec * 8 = 0,8 sec
 .set DELAY_LENGTH, 0x8CC3F        @11987E       @ 0,1 sec * 5 = 0,5 sec
 .set PAUSE_LENGTH, 0x384E60       @709CC0       @ 0,1 sec * 20 = 2 sec
-.set DEBOUNCE_TIME, 0x54759
+.set DEBOUNCE_TIME, 0x2330F
+
+.set OFF_TIME, 0x2330F
+.set ON_TIME, 0x6992D
+
 .set ONE_SECOND_TIME, 0x8CC3F
+.set THREE_SECOND_TIME, 0x1A64B4
 .set FOUR_SECOND_TIME, 0x1775FD @0x2330FC @18C7D3
 .set EIGHT_SECOND_TIME, 0x318FA6
 
 @ R5 - BUTTON_TIMER
 @ R6 - LED_TIMER
-@ R7 - LIGHT_ON flag
+@ R7 - LOOP TIMER
 @ R8 - DEBOUNCE_TIMER
+@ R9 - LOOP STATE flag
+@ R10 - LED_ON_TIME
 
 _start:
     bl setup_clock
@@ -38,9 +45,10 @@ _start:
 
     mov r5, #0          @ set BUTTON_TIMER to   0
     mov r6, #0          @ set LED_TIMER to      0
-    mov r7, #0          @ set LIGHT_ON flag to  0
+    mov r7, #0          @ set LOOP COUNTER  to  0
     mov r8, #0          @ set DEBOUNCE_TIMER to 0
-    
+    mov r9, #0          @ set LOOP STATE     to 0
+
 loop:
     @ test if DEBOUNCE_TIMER is 0
     teq r8, #0
@@ -61,36 +69,91 @@ loop:
 
                         @ otherwise
     teq r6, #0          @ is LED_TIMER == 0?
-    ite ne
-    subne r6, #1        @ if not, decrement LED_TIMER
-    bleq green_led_off  @ if yes, turn the LED off
+
+    beq on_led_timer_zero
+
+    sub r6, #1          @ if not, decrement LED_TIMER
+
+    ldr r2, =THREE_SECOND_TIME
+    cmp r6, r2
+
+    bgt loop            @ if more than 3sec left in LED TIMER, jump to loop
+
+    @ if less then three seconds left
+    teq r7, #0  @ check if LOOP TIMER is 0
+
+    beq on_loop_timer_zero @ if it is 0 jump to on_loop_timer_zero
+
+    sub r7, #1
+
+b loop
+
+on_loop_timer_zero:
+    eors r9, #1 @ toggle the LOOP STATE
+    
+    bne set_loop_timer_off
+
+    ldr r7, =ON_TIME
+    bl blue_led_on
+
+b loop
+
+set_loop_timer_off:
+    ldr r7, =OFF_TIME
+    bl blue_led_off
+
+b loop
+
+on_led_timer_zero:
+    bl green_led_off
+    bl blue_led_off
+
+    mov r9, #0  @ clear LOOP STATE
+    mov r7, #0  @ clear LOOP COUNTER
 
 b loop
 
 set_led_timer:
-
     ldr r2, =ONE_SECOND_TIME
     cmp r5, r2
+
+    mov r5, #0          @ clear the BUTTON_TIMER
+    bl blue_led_on      @ turn the blue led on
+
     bgt set_eight_sec
     ldr r6, =FOUR_SECOND_TIME
-    mov r5, #0          @ clear the BUTTON_TIMER
+    ldr r10, =FOUR_SECOND_TIME
 
 b loop
 
 set_eight_sec:
     ldr r6, =EIGHT_SECOND_TIME
-    mov r5, #0          @ clear the BUTTON_TIMER
+    ldr r10, =EIGHT_SECOND_TIME
 
 b loop
 
 btn_pressed:
-    
+
     teq r5, #0          @ check if the button was pressed before (BUTTON_TIMER != 0)
 
     add r5, #1          @ increment BUTTON_TIMER
 
     bne button_was_pressed_before
 
+    @ if LED_TIMER != 0 --> reload LED_TIMER
+    teq r6, #0
+    beq set_debounce
+
+    @ otherwise, reload LED_TIMER
+    mov r6, r10
+
+    mov r5, #0  @ clear BUTTON_TIMER
+    mov r9, #0  @ clear LOOP STATE
+    mov r7, #0  @ clear LOOP COUNTER
+
+b loop
+
+set_debounce:
     @ init debouncing
     ldr r8, =DEBOUNCE_TIME
     
